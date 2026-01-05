@@ -30,8 +30,7 @@ interface Message {
 
 // Configuration placeholder
 const API_CONFIG = {
-  WS_ENDPOINT: "wss://your-backend-api.vercel.app/voice-stream",
-  HF_INFERENCE_URL: "https://api-inference.huggingface.co/models/",
+  WS_ENDPOINT: "wss://superai-ivr-34isl21s.livekit.cloud",
 };
 
 // --- Components ---
@@ -92,12 +91,10 @@ export default function VoiceBotApp() {
   const handleConnect = () => {
     setBotState("processing");
 
-    // Simulate connection delay
-    setTimeout(() => {
-      setIsConnected(true);
-      setBotState("idle");
-      addMessage("system", "Connected to HF Inference Model.");
-    }, 1500);
+   // Example of what to add:
+const socket = new WebSocket(API_CONFIG.WS_ENDPOINT);
+socket.onopen = () => setIsConnected(true);
+socket.onmessage = (event) => { /* Handle incoming audio/text here */ };
   };
 
   const handleDisconnect = () => {
