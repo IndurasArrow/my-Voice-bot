@@ -289,16 +289,18 @@ export default function VoiceBotApp() {
 
   const handleConnect = async () => {
     try {
-      const resp = await fetch("/api/token");
-      const data = await resp.json();
-      if (data.accessToken) {
-        setToken(data.accessToken);
-        setShouldConnect(true);
+      setBotState("processing");
+      
+      // 1. Fetch the token from your route.ts
+      const response = await fetch("/api/token");
+      const data = await response.json();
+
+      // 2. CRITICAL FIX: Extract the string from the object
+      const token = data.accessToken; 
+
+      if (!token) {
+        throw new Error("No access token found in response");
       }
-    } catch (e) {
-      console.error("Failed to fetch token", e);
-    }
-  };
 
   const handleDisconnect = () => {
     setShouldConnect(false);
