@@ -11,11 +11,7 @@ import {
   FileText,
 } from "lucide-react";
 // Import LiveKit SDK
-import {
-  Room,
-  RoomEvent,
-  Track,
-} from "livekit-client";
+import { Room, RoomEvent, Track } from "livekit-client";
 
 /**
  * TYPES AND INTERFACES
@@ -82,7 +78,7 @@ export default function VoiceBotApp() {
 
   // LiveKit Room Reference
   const roomRef = useRef<Room | null>(null);
-  
+
   // Audio Visualization Refs
   const analyzerRef = useRef<AnalyserNode | null>(null);
   const dataArrayRef = useRef<Uint8Array | null>(null);
@@ -102,19 +98,28 @@ export default function VoiceBotApp() {
       setBotState("processing");
       addMessage("system", "Connecting to Server...");
 
-      // 1. Fetch Token from your Backend (route.ts)
+      // 1. Fetch Token from your Backend
       const response = await fetch("/api/token");
       const data = await response.json();
-      
-      // Extract the token string (Fixing the [object Object] error)
-      const token = data.accessToken;
-      
+
+      console.log("Full API Response:", data); // Debugging line
+
+      // 2. CRITICAL FIX: Robust extraction logic
+      // Checks for 'accessToken' (route.ts) OR 'participant_token' (token_lvekit.ts)
+      const token = data.accessToken || data.participant_token || data.token;
+
       // Use env var or fallback to your specific URL
-      const url = process.env.NEXT_PUBLIC_LIVEKIT_URL || "wss://superai-ivr-34isl21s.livekit.cloud";
+      const url =
+        process.env.NEXT_PUBLIC_LIVEKIT_URL ||
+        data.server_url ||
+        "wss://superai-ivr-34isl21s.livekit.cloud";
 
-      if (!token) throw new Error("No token received from backend");
+      if (!token) {
+        console.error("Token missing. API returned:", data);
+        throw new Error("No token found in API response. Check console logs.");
+      }
 
-      // 2. Create LiveKit Room
+      // 3. Create LiveKit Room
       const room = new Room({
         dynacast: true,
         publishDefaults: {
@@ -123,7 +128,7 @@ export default function VoiceBotApp() {
       });
       roomRef.current = room;
 
-      // 3. Setup Event Listeners
+      // 4. Setup Event Listeners
       room
         .on(RoomEvent.SignalConnected, () => console.log("Signal connected"))
         .on(RoomEvent.Connected, () => {
@@ -143,18 +148,18 @@ export default function VoiceBotApp() {
             // Play the audio
             const element = track.attach();
             document.body.appendChild(element);
-            
+
             // Visualize Bot Audio
             if (track.mediaStreamTrack) {
-               const mediaStream = new MediaStream([track.mediaStreamTrack]);
-               setupRealVisualizer(mediaStream);
+              const mediaStream = new MediaStream([track.mediaStreamTrack]);
+              setupRealVisualizer(mediaStream);
             }
             setBotState("speaking");
           }
         })
         .on(RoomEvent.TrackUnsubscribed, (track) => {
-           // Bot stopped speaking
-           setBotState("idle");
+          // Bot stopped speaking
+          setBotState("idle");
         })
         // Handle Text Messages (if any)
         .on(RoomEvent.DataReceived, (payload, participant) => {
@@ -163,10 +168,10 @@ export default function VoiceBotApp() {
           addMessage("bot", str);
         });
 
-      // 4. Connect
+      // 5. Connect
+      console.log("Connecting with token:", token.substring(0, 10) + "...");
       await room.connect(url, token);
       console.log("Connected to Room:", room.name);
-
     } catch (error) {
       console.error("Connection failed:", error);
       setBotState("idle");
@@ -182,7 +187,8 @@ export default function VoiceBotApp() {
     setIsConnected(false);
     setBotState("idle");
     setAudioLevel(0);
-    if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+    if (animationFrameRef.current)
+      cancelAnimationFrame(animationFrameRef.current);
   };
 
   // --- Real Microphone & Visualizer Logic ---
@@ -193,26 +199,37 @@ export default function VoiceBotApp() {
     if (botState === "listening") {
       // STOP LISTENING
       // Unpublish microphone
-      roomRef.current.localParticipant.audioTrackPublications.forEach((publication) => {
-        publication.track?.stop();
-        roomRef.current?.localParticipant.unpublishTrack(publication.track as any);
-      });
-      
-      setBotState("processing"); 
-      setAudioLevel(0);
-      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+      roomRef.current.localParticipant.audioTrackPublications.forEach(
+        (publication) => {
+          publication.track?.stop();
+          roomRef.current?.localParticipant.unpublishTrack(
+            publication.track as any
+          );
+        }
+      );
 
+      setBotState("processing");
+      setAudioLevel(0);
+      if (animationFrameRef.current)
+        cancelAnimationFrame(animationFrameRef.current);
     } else {
       // START LISTENING
       setBotState("listening");
       try {
         // Enable Mic
-        const publication = await roomRef.current.localParticipant.setMicrophoneEnabled(true);
-        
+        const publication =
+          await roomRef.current.localParticipant.setMicrophoneEnabled(true);
+
         // Visualize Mic Audio
-        if (publication && publication.track && publication.track.mediaStreamTrack) {
-           const mediaStream = new MediaStream([publication.track.mediaStreamTrack]);
-           setupRealVisualizer(mediaStream);
+        if (
+          publication &&
+          publication.track &&
+          publication.track.mediaStreamTrack
+        ) {
+          const mediaStream = new MediaStream([
+            publication.track.mediaStreamTrack,
+          ]);
+          setupRealVisualizer(mediaStream);
         }
       } catch (e) {
         console.error("Mic error:", e);
@@ -224,36 +241,38 @@ export default function VoiceBotApp() {
 
   const setupRealVisualizer = (stream: MediaStream) => {
     // Check if context exists
-    const AudioContextClass = (window.AudioContext || (window as any).webkitAudioContext);
+    const AudioContextClass =
+      window.AudioContext || (window as any).webkitAudioContext;
     if (!AudioContextClass) return;
 
     const audioContext = new AudioContextClass();
     const analyser = audioContext.createAnalyser();
     const source = audioContext.createMediaStreamSource(stream);
-    
+
     source.connect(analyser);
-    analyser.fftSize = 64; 
-    
+    analyser.fftSize = 64;
+
     const bufferLength = analyser.frequencyBinCount;
     const dataArray = new Uint8Array(bufferLength);
-    
+
     analyzerRef.current = analyser;
     dataArrayRef.current = dataArray;
 
     const updateVolume = () => {
       if (!analyzerRef.current || !dataArrayRef.current) return;
-      
+
+      // FIX: Cast to 'any' to resolve strict TypeScript ArrayBuffer mismatch
       analyzerRef.current.getByteFrequencyData(dataArrayRef.current as any);
-      
+
       // Calculate volume
       let sum = 0;
       for (let i = 0; i < bufferLength; i++) {
         sum += dataArrayRef.current[i];
       }
       const average = sum / bufferLength;
-      
+
       // Normalize (0.0 to 1.0) for the orb scale
-      setAudioLevel(average / 100); 
+      setAudioLevel(average / 100);
 
       animationFrameRef.current = requestAnimationFrame(updateVolume);
     };
@@ -368,7 +387,10 @@ export default function VoiceBotApp() {
                   ) : botState === "processing" ? (
                     <Loader2 size={48} className="animate-spin text-white/50" />
                   ) : botState === "speaking" ? (
-                    <Volume2 size={48} className="animate-pulse text-blue-300" />
+                    <Volume2
+                      size={48}
+                      className="animate-pulse text-blue-300"
+                    />
                   ) : (
                     <Mic
                       size={48}
