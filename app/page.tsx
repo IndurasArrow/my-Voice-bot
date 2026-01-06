@@ -243,7 +243,7 @@ export default function VoiceBotApp() {
     const updateVolume = () => {
       if (!analyzerRef.current || !dataArrayRef.current) return;
       
-      analyzerRef.current.getByteFrequencyData(dataArrayRef.current);
+      analyzerRef.current.getByteFrequencyData(dataArrayRef.current as any);
       
       // Calculate volume
       let sum = 0;
