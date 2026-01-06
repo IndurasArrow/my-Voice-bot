@@ -10,15 +10,11 @@ import {
   Loader2,
   FileText,
 } from "lucide-react";
-// 1. Import the real LiveKit SDK
+// Import LiveKit SDK
 import {
   Room,
   RoomEvent,
-  RemoteParticipant,
-  RemoteTrack,
   Track,
-  TrackPublication,
-  LocalTrackPublication,
 } from "livekit-client";
 
 /**
@@ -84,9 +80,10 @@ export default function VoiceBotApp() {
   const [transcript, setTranscript] = useState<Message[]>([]);
   const [showHistory, setShowHistory] = useState(false);
 
-  // Use a Ref to keep the Room instance persistent
+  // LiveKit Room Reference
   const roomRef = useRef<Room | null>(null);
-  // Ref for the visualization animation loop
+  
+  // Audio Visualization Refs
   const analyzerRef = useRef<AnalyserNode | null>(null);
   const dataArrayRef = useRef<Uint8Array | null>(null);
   const animationFrameRef = useRef<number | null>(null);
@@ -105,21 +102,23 @@ export default function VoiceBotApp() {
       setBotState("processing");
       addMessage("system", "Connecting to Server...");
 
-      // 1. Get Token from your Backend
+      // 1. Fetch Token from your Backend (route.ts)
       const response = await fetch("/api/token");
       const data = await response.json();
+      
+      // Extract the token string (Fixing the [object Object] error)
       const token = data.accessToken;
-      // Get the URL from env or use the one from the token response if available
-      const url = process.env.NEXT_PUBLIC_LIVEKIT_URL || data.server_url || "wss://superai-ivr-34isl21s.livekit.cloud";
+      
+      // Use env var or fallback to your specific URL
+      const url = process.env.NEXT_PUBLIC_LIVEKIT_URL || "wss://superai-ivr-34isl21s.livekit.cloud";
 
-      if (!token) throw new Error("No token received");
+      if (!token) throw new Error("No token received from backend");
 
       // 2. Create LiveKit Room
       const room = new Room({
-        // adaptiveStream: true,
         dynacast: true,
         publishDefaults: {
-          simulcast: false, // simpler for voice
+          simulcast: false,
         },
       });
       roomRef.current = room;
@@ -136,30 +135,32 @@ export default function VoiceBotApp() {
           setIsConnected(false);
           setBotState("idle");
           addMessage("system", "Disconnected.");
+          setAudioLevel(0);
         })
-        // When the Bot speaks (subscribing to its audio)
+        // When Bot Speaks (Subscribe to Audio)
         .on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
           if (track.kind === Track.Kind.Audio) {
-            // Attach audio to a hidden HTML element to play it
+            // Play the audio
             const element = track.attach();
             document.body.appendChild(element);
             
-            // Optional: Hook up visualizer to BOT audio too
-            // setupVisualizer(element.srcObject as MediaStream); 
+            // Visualize Bot Audio
+            if (track.mediaStreamTrack) {
+               const mediaStream = new MediaStream([track.mediaStreamTrack]);
+               setupRealVisualizer(mediaStream);
+            }
+            setBotState("speaking");
           }
         })
-        // Handle Chat Messages from the Bot (Data Channel)
+        .on(RoomEvent.TrackUnsubscribed, (track) => {
+           // Bot stopped speaking
+           setBotState("idle");
+        })
+        // Handle Text Messages (if any)
         .on(RoomEvent.DataReceived, (payload, participant) => {
           const decoder = new TextDecoder();
           const str = decoder.decode(payload);
-          // Assuming bot sends JSON or plain text
-          try {
-            const msg = JSON.parse(str);
-            // Handle structured messages if your python bot sends them
-          } catch (e) {
-             // Fallback for plain text
-             // addMessage("bot", str);
-          }
+          addMessage("bot", str);
         });
 
       // 4. Connect
@@ -179,24 +180,25 @@ export default function VoiceBotApp() {
       roomRef.current = null;
     }
     setIsConnected(false);
+    setBotState("idle");
     setAudioLevel(0);
     if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
   };
 
-  // --- Real Microphone Logic ---
+  // --- Real Microphone & Visualizer Logic ---
 
   const toggleRecording = async () => {
     if (!isConnected || !roomRef.current) return;
 
     if (botState === "listening") {
       // STOP LISTENING
-      // Unpublish microphone to stop sending audio
+      // Unpublish microphone
       roomRef.current.localParticipant.audioTrackPublications.forEach((publication) => {
         publication.track?.stop();
         roomRef.current?.localParticipant.unpublishTrack(publication.track as any);
       });
       
-      setBotState("processing"); // Wait for bot response
+      setBotState("processing"); 
       setAudioLevel(0);
       if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
 
@@ -204,14 +206,12 @@ export default function VoiceBotApp() {
       // START LISTENING
       setBotState("listening");
       try {
-        // Publish Microphone
+        // Enable Mic
         const publication = await roomRef.current.localParticipant.setMicrophoneEnabled(true);
         
-        // Hook up Visualizer to Real Audio
-        if (publication && publication.track) {
-           // We need the raw MediaStreamTrack to visualize it
-           const mediaStreamTrack = publication.track.mediaStreamTrack;
-           const mediaStream = new MediaStream([mediaStreamTrack]);
+        // Visualize Mic Audio
+        if (publication && publication.track && publication.track.mediaStreamTrack) {
+           const mediaStream = new MediaStream([publication.track.mediaStreamTrack]);
            setupRealVisualizer(mediaStream);
         }
       } catch (e) {
@@ -222,14 +222,17 @@ export default function VoiceBotApp() {
     }
   };
 
-  // --- Real Audio Visualizer (Replaces Random Simulation) ---
   const setupRealVisualizer = (stream: MediaStream) => {
-    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    // Check if context exists
+    const AudioContextClass = (window.AudioContext || (window as any).webkitAudioContext);
+    if (!AudioContextClass) return;
+
+    const audioContext = new AudioContextClass();
     const analyser = audioContext.createAnalyser();
     const source = audioContext.createMediaStreamSource(stream);
     
     source.connect(analyser);
-    analyser.fftSize = 64; // Low precision is fine for an Orb
+    analyser.fftSize = 64; 
     
     const bufferLength = analyser.frequencyBinCount;
     const dataArray = new Uint8Array(bufferLength);
@@ -242,15 +245,14 @@ export default function VoiceBotApp() {
       
       analyzerRef.current.getByteFrequencyData(dataArrayRef.current);
       
-      // Calculate average volume
+      // Calculate volume
       let sum = 0;
       for (let i = 0; i < bufferLength; i++) {
         sum += dataArrayRef.current[i];
       }
       const average = sum / bufferLength;
       
-      // Normalize to 0-1 range (audio often is 0-255)
-      // Dividing by 100 makes it reactive without being too huge
+      // Normalize (0.0 to 1.0) for the orb scale
       setAudioLevel(average / 100); 
 
       animationFrameRef.current = requestAnimationFrame(updateVolume);
@@ -263,7 +265,6 @@ export default function VoiceBotApp() {
     setTranscript((prev) => [...prev, { role, text, timestamp: new Date() }]);
   };
 
-  // Auto-scroll chat in modal
   const chatEndRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (showHistory) {
@@ -278,7 +279,7 @@ export default function VoiceBotApp() {
 
   return (
     <div className="relative min-h-screen w-full overflow-hidden bg-slate-900 text-white font-sans selection:bg-purple-500/30">
-      {/* 1. Soothing Background Animation */}
+      {/* Background Animation */}
       <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
         <div className="absolute top-[-20%] left-[-20%] w-[80vw] h-[80vw] bg-purple-600/20 rounded-full mix-blend-screen filter blur-[100px] animate-blob" />
         <div className="absolute top-[-10%] right-[-20%] w-[70vw] h-[70vw] bg-blue-600/20 rounded-full mix-blend-screen filter blur-[100px] animate-blob animation-delay-2000" />
@@ -286,7 +287,7 @@ export default function VoiceBotApp() {
         <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 brightness-100 contrast-150"></div>
       </div>
 
-      {/* 2. Main Content Container */}
+      {/* Main Content */}
       <main className="relative z-10 flex flex-col items-center justify-center min-h-screen p-6">
         {/* Header */}
         <header className="absolute top-6 left-0 right-0 px-8 flex justify-between items-center">
@@ -310,30 +311,26 @@ export default function VoiceBotApp() {
           </div>
         </header>
 
-        {/* Central Avatar / Orb */}
+        {/* Central Orb */}
         <div className="flex-1 flex flex-col items-center justify-center w-full max-w-lg relative">
-          {/* Status Indicator Text */}
           <div className="mb-12 h-8 flex items-center justify-center">
             <span className="text-white/60 text-sm font-medium tracking-widest uppercase animate-fade-in">
-              {botState === "idle" &&
-                isConnected &&
-                "Ready. Press Talk."}
+              {botState === "idle" && isConnected && "Ready. Press Talk."}
               {botState === "idle" && !isConnected && "Disconnected"}
               {botState === "listening" && "Listening..."}
-              {botState === "processing" && "Bot is thinking..."}
+              {botState === "processing" && "Thinking..."}
               {botState === "speaking" && "Speaking..."}
             </span>
           </div>
 
-          {/* The Orb */}
           <div
             className="relative group cursor-pointer"
             onClick={toggleRecording}
           >
-            {/* Outer Glow Rings */}
+            {/* Glow Rings (React to Audio Level) */}
             <div
-              className="absolute inset-0 rounded-full bg-gradient-to-tr from-purple-500 to-blue-500 blur-2xl transition-all duration-100 opacity-40"
-              style={{ transform: `scale(${1 + audioLevel * 0.5})` }}
+              className="absolute inset-0 rounded-full bg-gradient-to-tr from-purple-500 to-blue-500 blur-2xl transition-all duration-75 opacity-40"
+              style={{ transform: `scale(${1 + audioLevel * 1.5})` }}
             />
 
             {/* Core Orb */}
@@ -371,10 +368,7 @@ export default function VoiceBotApp() {
                   ) : botState === "processing" ? (
                     <Loader2 size={48} className="animate-spin text-white/50" />
                   ) : botState === "speaking" ? (
-                    <Volume2
-                      size={48}
-                      className="animate-pulse text-blue-300"
-                    />
+                    <Volume2 size={48} className="animate-pulse text-blue-300" />
                   ) : (
                     <Mic
                       size={48}
