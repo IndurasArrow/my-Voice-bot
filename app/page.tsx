@@ -102,11 +102,23 @@ export default function VoiceBotApp() {
       const response = await fetch("/api/token");
       const data = await response.json();
 
-      console.log("Full API Response:", data); // Debugging line
+      console.log("Full API Response:", data);
 
-      // 2. CRITICAL FIX: Robust extraction logic
-      // Checks for 'accessToken' (route.ts) OR 'participant_token' (token_lvekit.ts)
-      const token = data.accessToken || data.participant_token || data.token;
+      // 2. EXTRA ROBUST FIX: Handle nested objects
+      let token = data.accessToken || data.participant_token || data.token;
+
+      // If token is an object (due to backend error), try to find the string inside
+      if (typeof token === "object" && token !== null) {
+        console.warn("Token is an object, attempting to extract string...");
+        // Sometimes it might be nested like { accessToken: "..." } inside the accessToken field
+        token = token.accessToken || token.token || Object.values(token)[0];
+      }
+
+      if (typeof token !== "string") {
+        throw new Error(
+          "Token is not a string. Received: " + JSON.stringify(token)
+        );
+      }
 
       // Use env var or fallback to your specific URL
       const url =

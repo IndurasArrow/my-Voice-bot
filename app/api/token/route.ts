@@ -19,10 +19,12 @@ export async function GET(req: NextRequest) {
 
   at.addGrant({
     roomJoin: true,
-    room: "voice-bot-room", // Or make this dynamic
+    room: "voice-bot-room",
     canPublish: true,
     canSubscribe: true,
   });
 
-  return NextResponse.json({ accessToken: at.toJwt() });
+  const jwt = await at.toJwt();
+
+  return NextResponse.json({ accessToken: jwt });
 }
