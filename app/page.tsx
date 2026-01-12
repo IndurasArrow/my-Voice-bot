@@ -444,24 +444,36 @@ export default function VoiceBotApp() {
                 </Button>
 
                 <Button
-                  variant={botState === "listening" ? "danger" : "primary"}
+                  // Logic: If listening, 'danger' (Red). If processing, 'ghost' (Grey). Else 'primary'.
+                  variant={
+                    botState === "listening"
+                      ? "danger"
+                      : botState === "processing"
+                      ? "ghost"
+                      : "primary"
+                  }
                   onClick={toggleRecording}
-                  className="min-w-[140px] justify-center"
+                  // Disable button while processing (prevents accidental resets unless stuck for long)
+                  disabled={botState === "speaking"}
+                  className="min-w-[160px] justify-center"
                 >
                   {botState === "listening" ? (
                     <>
+                      {/* STOP BUTTON */}
                       <span className="w-2 h-2 bg-white rounded-full animate-pulse" />
-                      Stop
+                      Stop Recording
                     </>
                   ) : botState === "processing" ? (
                     <>
-                      <RefreshCw size={18} />
-                      Reset
+                      {/* PROCESSING STATE */}
+                      <Loader2 size={18} className="animate-spin" />
+                      Processing...
                     </>
                   ) : (
                     <>
+                      {/* START BUTTON */}
                       <Mic size={18} />
-                      Talk
+                      Tap to Speak
                     </>
                   )}
                 </Button>
