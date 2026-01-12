@@ -137,7 +137,9 @@ export default function VoiceBotApp() {
         audioCaptureDefaults: {
           autoGainControl: true,
           echoCancellation: true,
-          noiseSuppression: true,
+          noiseSuppression: true, // Critical for mobile background noise
+          channelCount: 1, // Force Mono (Whisper hates Stereo)
+          sampleRate: 16000, // Force 16kHz (Standard for speech AI)
         },
       });
       roomRef.current = room;
